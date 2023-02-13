@@ -1,4 +1,4 @@
-# #scale Backstage provider
+# 3scale Backstage provider
 
 This is a plugin for synchronizing 3scale content into [Backstage.io](https://backstage.io/) catalog.
 
