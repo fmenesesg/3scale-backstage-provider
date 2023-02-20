@@ -3,22 +3,31 @@ import {
   Entity,
   ApiEntity,
   ANNOTATION_LOCATION,
-  ANNOTATION_ORIGIN_LOCATION
+  ANNOTATION_ORIGIN_LOCATION,
 } from '@backstage/catalog-model';
 import { Config } from '@backstage/config';
 import {
   EntityProvider,
-  EntityProviderConnection
+  EntityProviderConnection,
 } from '@backstage/plugin-catalog-backend';
 import { Logger } from 'winston';
-import { getProxyConfig, listApiDocs, listServices } from '../clients/ThreeScaleAPIConnector';
-import { APIDocElement, APIDocs, Proxy, ServiceElement, Services } from '../clients/types';
+import {
+  getProxyConfig,
+  listApiDocs,
+  listServices,
+} from '../clients/ThreeScaleAPIConnector';
+import {
+  APIDocElement,
+  APIDocs,
+  Proxy,
+  ServiceElement,
+  Services,
+} from '../clients/types';
 
 import { readThreeScaleApiEntityConfigs } from './config';
 import { ThreeScaleConfig } from './types';
 
 export class ThreeScaleApiEntityProvider implements EntityProvider {
-
   private static SERVICES_FETCH_SIZE: number = 500;
   private readonly env: string;
   private readonly baseUrl: string;
@@ -26,32 +35,32 @@ export class ThreeScaleApiEntityProvider implements EntityProvider {
   private readonly logger: Logger;
   private readonly scheduleFn: () => Promise<void>;
   private connection?: EntityProviderConnection;
-  
-  static fromConfig(
-      configRoot: Config, 
-      options: {
-        logger: Logger;
-        schedule?: TaskRunner;
-        scheduler?: PluginTaskScheduler;
-      }) : ThreeScaleApiEntityProvider[] {
 
+  static fromConfig(
+    configRoot: Config,
+    options: {
+      logger: Logger;
+      schedule?: TaskRunner;
+      scheduler?: PluginTaskScheduler;
+    },
+  ): ThreeScaleApiEntityProvider[] {
     const providerConfigs = readThreeScaleApiEntityConfigs(configRoot);
-    
+
     if (!options.schedule && !options.scheduler) {
       throw new Error('Either schedule or scheduler must be provided.');
     }
 
     return providerConfigs.map(providerConfig => {
-
       if (!options.schedule && !providerConfig.schedule) {
         throw new Error(
           `No schedule provided neither via code nor config for ThreeScaleApiEntityProvider:${providerConfig.id}.`,
         );
       }
 
-      const taskRunner = options.schedule ??
+      const taskRunner =
+        options.schedule ??
         options.scheduler!.createScheduledTaskRunner(providerConfig.schedule!);
-    
+
       return new ThreeScaleApiEntityProvider(
         providerConfig,
         options.logger,
@@ -60,7 +69,11 @@ export class ThreeScaleApiEntityProvider implements EntityProvider {
     });
   }
 
-  private constructor(config: ThreeScaleConfig, logger: Logger, taskRunner: TaskRunner) {
+  private constructor(
+    config: ThreeScaleConfig,
+    logger: Logger,
+    taskRunner: TaskRunner,
+  ) {
     this.env = config.id;
     this.baseUrl = config.baseUrl;
     this.accessToken = config.accessToken;
@@ -110,26 +123,50 @@ export class ThreeScaleApiEntityProvider implements EntityProvider {
     let apiDocs: APIDocs;
     let fetchServices: boolean = true;
     while (fetchServices) {
-      services = await listServices(this.baseUrl, this.accessToken , page, ThreeScaleApiEntityProvider.SERVICES_FETCH_SIZE);
+      services = await listServices(
+        this.baseUrl,
+        this.accessToken,
+        page,
+        ThreeScaleApiEntityProvider.SERVICES_FETCH_SIZE,
+      );
       apiDocs = await listApiDocs(this.baseUrl, this.accessToken);
       for (const element of services.services) {
         const service = element;
-        this.logger.debug("Find service " + service.service.name);
+        this.logger.debug(`Find service ${service.service.name}`);
 
-        // Trying to find the API Doc for the service.
-        let apiDoc = apiDocs.api_docs.find((obj) => {
-          return obj.api_doc.service_id == service.service.id});
-        let proxy = await getProxyConfig(this.baseUrl, this.accessToken, service.service.id);
-        if (apiDoc != null) {
-          const apiEntity: ApiEntity = this.buildApiEntityFromService(service, apiDoc, proxy);
+        // Trying to find the API Doc for the service and validate if api doc was assigned to an API.
+        const findApiDoc = (): APIDocElement | undefined => {
+          return apiDocs.api_docs.find(item => {
+            if (item.api_doc.service_id !== undefined) {
+              return item.api_doc.service_id === service.service.id;
+            }
+            return false;
+          });
+        };
+
+        const apiDoc = findApiDoc();
+
+        const proxy = await getProxyConfig(
+          this.baseUrl,
+          this.accessToken,
+          service.service.id,
+        );
+        if (apiDoc !== undefined) {
+          const apiEntity: ApiEntity = this.buildApiEntityFromService(
+            service,
+            apiDoc,
+            proxy,
+          );
           entities.push(apiEntity);
-          this.logger.info("Discovered ApiEntity " + service.service.name);
+          this.logger.debug(`Discovered ApiEntity ${service.service.name}`);
         }
-        
-      };
-    
-      if (services.services.length < ThreeScaleApiEntityProvider.SERVICES_FETCH_SIZE) {
-        fetchServices = false
+      }
+
+      if (
+        services.services.length <
+        ThreeScaleApiEntityProvider.SERVICES_FETCH_SIZE
+      ) {
+        fetchServices = false;
       }
       page++;
     }
@@ -140,58 +177,56 @@ export class ThreeScaleApiEntityProvider implements EntityProvider {
       type: 'full',
       entities: entities.map(entity => ({
         entity,
-        locationKey: 'ThreeScaleApiEntityProvider',
+        locationKey: this.getProviderName(),
       })),
     });
   }
 
-  private buildApiEntityFromService(service: ServiceElement, apiDoc: APIDocElement, proxy: Proxy): ApiEntity {
+  private buildApiEntityFromService(
+    service: ServiceElement,
+    apiDoc: APIDocElement,
+    proxy: Proxy,
+  ): ApiEntity {
     const location = `url:${this.baseUrl}/apiconfig/services/${service.service.id}`;
 
-    let description: string | undefined;
-    let spec;
-    spec = JSON.parse(apiDoc.api_doc.body);
-    description = spec.info.description;
-
-    if (!description) {
-      description = 'Version: ' + service.service.description;
-    }
+    const spec = JSON.parse(apiDoc.api_doc.body);
 
     return {
-      kind: "API",
-      apiVersion: "backstage.io/v1alpha1",
+      kind: 'API',
+      apiVersion: 'backstage.io/v1alpha1',
       metadata: {
         annotations: {
           [ANNOTATION_LOCATION]: location,
-          [ANNOTATION_ORIGIN_LOCATION]: location
+          [ANNOTATION_ORIGIN_LOCATION]: location,
         },
-        // TODO: add tenant name
-        name: `${service.service.system_name}}`.replaceAll('}', ''),
-        description: description,
-        //TODO: add labels
-        //labels: this.getApiEntityLabels(service),
+        //  TODO: add tenant name
+        name: `${service.service.system_name}`,
+        description:
+          spec.info.description || `Version: ${service.service.description}`,
+        //  TODO: add labels
+        //  labels: this.getApiEntityLabels(service),
         links: [
           {
             url: `${this.baseUrl}/apiconfig/services/${service.service.id}`,
-            title: '3scale Overview'
+            title: '3scale Overview',
           },
           {
             url: `${proxy.proxy.sandbox_endpoint}`,
-            title: 'Staging Apicast Endpoint'
+            title: 'Staging Apicast Endpoint',
           },
           {
             url: `${proxy.proxy.endpoint}`,
-            title: 'Production Apicast Endpoint'
-          }
-        ]
+            title: 'Production Apicast Endpoint',
+          },
+        ],
       },
       spec: {
         type: 'openapi',
         lifecycle: this.env,
         system: '3scale',
         owner: '3scale',
-        definition: apiDoc.api_doc.body
-      }
-    }
+        definition: apiDoc.api_doc.body,
+      },
+    };
   }
 }

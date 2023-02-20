@@ -1,6 +1,6 @@
 {
   "name": "@fmenesesg/threescale-backstage-provider",
-  "version": "0.0.2",
+  "version": "0.0.8",
   "author": "Francisco Meneses <fmeneses@redhat.com>",
   "license": "Apache-2.0",
   "main": "src/index.ts",
@@ -28,10 +28,6 @@
     "@backstage/catalog-model": "^1.1.4",
     "@backstage/config": "^1.0.5",
     "@backstage/plugin-catalog-backend": "^1.6.0",
-    "@types/express": "*",
-    "express": "^4.17.3",
-    "express-promise-router": "^4.1.0",
-    "js-base64": "^3.7.3",
     "node-fetch": "^2.6.7",
     "winston": "^3.2.1",
     "yn": "^4.0.0"
