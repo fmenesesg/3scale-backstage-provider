@@ -3,21 +3,13 @@ import { Config } from '@backstage/config';
 import { ThreeScaleConfig } from './types';
 
 export function readThreeScaleApiEntityConfigs(config: Config): ThreeScaleConfig[] {
-  const configs: ThreeScaleConfig[] = [];
-
   const providerConfigs = config.getOptionalConfig(
     'catalog.providers.threeScaleApiEntity',
   );
-
   if (!providerConfigs) {
-    return configs;
+    return [];
   }
-
-  for (const id of providerConfigs.keys()) {
-    configs.push(readThreeScaleApiEntityConfig(id, providerConfigs.getConfig(id)));
-  }
-
-  return configs;
+  return providerConfigs.keys().map(id => readThreeScaleApiEntityConfig(id, providerConfigs.getConfig(id)))
 }
 
 function readThreeScaleApiEntityConfig(id: string, config: Config): ThreeScaleConfig {
